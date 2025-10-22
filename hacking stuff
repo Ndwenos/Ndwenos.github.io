@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Hacker Effect — Smart Code (Fixed)</title>
+<style>
+  :root{
+    --bg:#000;
+    --green:#7CFF7C;
+    --mono: "SFMono-Regular", "Menlo", "Monaco", "Courier New", monospace;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);font-family:var(--mono);color:var(--green);overflow:hidden}
+  canvas {position:fixed;inset:0;z-index:0;display:block}
+  .terminal-wrap{
+    position:relative;
+    z-index:2;
+    width:min(920px,94%);
+    max-width:1200px;
+    margin:5vh auto;
+    background: linear-gradient(180deg, rgba(0,0,0,0.45), rgba(0,0,0,0.28));
+    border-radius:12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.02);
+    overflow:hidden;
+    border:1px solid rgba(124,255,124,0.06);
+    backdrop-filter: blur(6px) saturate(1.1);
+  }
+  .terminal-top{
+    display:flex;align-items:center;gap:10px;padding:10px 14px;background:linear-gradient(180deg, rgba(124,255,124,0.02), rgba(124,255,124,0.005));
+    border-bottom:1px solid rgba(124,255,124,0.03);
+  }
+  .dots{display:flex;gap:8px}
+  .dot{width:12px;height:12px;border-radius:50%}
+  .dot.red{background:rgba(255,64,64,0.95)}
+  .dot.yellow{background:rgba(255,190,0,0.95)}
+  .dot.green{background:var(--green)}
+  .top-title{flex:1;color:rgba(124,255,124,0.85);font-weight:600;font-size:14px}
+  .controls{display:flex;gap:8px}
+  .btn{
+    background:transparent;border:1px solid rgba(124,255,124,0.06);padding:6px 10px;border-radius:8px;color:var(--green);cursor:pointer;
+    font-family:var(--mono);font-size:13px;
+  }
+  .screen{
+    padding:28px;
+    min-height:52vh;
+    line-height:1.5;
+    font-size:15px;
+    position:relative;
+    overflow:auto;
+    max-height:70vh;
+  }
+  .line{white-space:pre-wrap;word-break:break-word}
+  .prompt{color:rgba(124,255,124,0.95)}
+  .cursor{
+    display:inline-block;
+    width:9px;
+    height:18px;
+    background:var(--green);
+    margin-left:4px;
+    vertical-align:middle;
+    animation:blink 1s steps(1) infinite;
+    transform-origin:center;
+  }
+  @keyframes blink{50%{opacity:0}}
+  .noise{
+    pointer-events:none;
+    position:absolute;inset:0;z-index:1;
+    background-image:radial-gradient(circle at 10% 10%, rgba(255,255,255,0.02), transparent 2%),
+                      radial-gradient(circle at 90% 80%, rgba(255,255,255,0.01), transparent 3%);
+    mix-blend-mode: soft-light;opacity:.6;
+  }
+  .glitch{position:relative;display:inline-block;color:var(--green)}
+  .glitch::before, .glitch::after{content:attr(data-text);position:absolute;left:0;top:0;opacity:.8;pointer-events:none}
+  .glitch::before{transform:translate(-2px,-1px);color:#58f;mix-blend-mode:screen}
+  .glitch::after{transform:translate(2px,1px);color:#ff3bff;mix-blend-mode:screen}
+  @media (max-width:640px){
+    .terminal-wrap{margin:2vh auto;padding-bottom:20px}
+    .screen{padding:18px;font-size:14px}
+    .cursor{height:16px;width:7px}
+  }
+</style>
+</head>
+<body>
+<canvas id="matrix"></canvas>
+
+<div class="terminal-wrap" role="region" aria-label="Hacker terminal demo">
+  <div class="terminal-top">
+    <div class="dots" aria-hidden="true">
+      <div class="dot red"></div>
+      <div class="dot yellow"></div>
+      <div class="dot green"></div>
+    </div>
+    <div class="top-title">h4x0r@localhost — secure-shell v0.3</div>
+    <div class="controls">
+      <button id="toggleMatrix" class="btn" title="Pause/Resume background">Pause</button>
+      <button id="regen" class="btn" title="Regenerate terminal output">Regenerate</button>
+      <button id="copyBtn" class="btn" title="Copy full output">Copy</button>
+    </div>
+  </div>
+
+  <div class="screen" id="screen">
+    <div class="noise" aria-hidden="true"></div>
+    <div id="terminalContent" aria-live="polite"></div>
+  </div>
+</div>
+
+<script>
+/* ========= Matrix background ========= */
+(() => {
+  const canvas = document.getElementById('matrix');
+  const ctx = canvas.getContext('2d');
+  let W, H;
+  function resize(){ W = canvas.width = innerWidth; H = canvas.height = innerHeight; initCols(); }
+  addEventListener('resize', resize, {passive:true});
+
+  const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%^&*()-_=+[]{};:,.<>/|\\';
+  let fontSize = 16;
+  let columns = [];
+  function initCols(){
+    fontSize = Math.max(12, Math.floor(Math.min(W, H) / 60));
+    const cols = Math.floor(W / fontSize) + 1;
+    columns = new Array(cols).fill(0).map(() => ({y: Math.random()*H, speed: 0.4 + Math.random()*3}));
+    ctx.font = fontSize + 'px monospace';
+  }
+
+  let running = true;
+  function toggleRunning(){ running = !running; document.getElementById('toggleMatrix').innerText = running ? 'Pause' : 'Resume'; }
+
+  function draw(){
+    if(!running){ requestAnimationFrame(draw); return; }
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.fillRect(0,0,W,H);
+
+    for(let i=0;i<columns.length;i++){
+      const col = columns[i];
+      const x = i * fontSize;
+      const char = letters.charAt(Math.floor(Math.random()*letters.length));
+      ctx.fillStyle = 'rgba(180,255,180,1)';
+      ctx.fillText(char, x, col.y);
+      for(let t = 1; t < 6; t++){
+        const g = Math.max(0, col.y - t*fontSize);
+        ctx.fillStyle = `rgba(124,255,124,${0.08 * (6 - t)})`;
+        ctx.fillText(letters.charAt(Math.floor(Math.random()*letters.length)), x, g);
+      }
+      col.y += col.speed * fontSize * 0.8;
+      if(col.y > H + Math.random()*1000) col.y = -Math.random()*1000;
+    }
+    requestAnimationFrame(draw);
+  }
+
+  resize();
+  draw();
+
+  window._matrixControl = {toggle: toggleRunning, stop: ()=> running=false, start: ()=> running=true};
+  document.getElementById('toggleMatrix').addEventListener('click', toggleRunning);
+})();
+
+/* ========= Smart code generator + fixed typewriter ========= */
+(() => {
+  const screen = document.getElementById('terminalContent');
+  const copyBtn = document.getElementById('copyBtn');
+  const regenBtn = document.getElementById('regen');
+
+  // Helpers
+  function rndHex(len){ const chars='0123456789abcdef'; let s=''; for(let i=0;i<len;i++) s+=chars[Math.floor(Math.random()*chars.length)]; return s; }
+  function rndId(prefix='x', len=6){ const chars='abcdefghijklmnopqrstuvwxyz'; let s=prefix; for(let i=0;i<len;i++) s += chars[Math.floor(Math.random()*chars.length)]; return s; }
+  function rndInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+  function sample(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+  function indent(level){ return '  '.repeat(level); }
+
+  // Clean, realistic snippet builders
+  function buildJavaScript(){
+    const fn = rndId('fetcher');
+    const url = `https://api.${sample(['data','svc','edge','meta'])}.example/${rndId('v',3)}/items`;
+    return `// JavaScript (Node/Fetch) - autogenerated
+import fetch from 'node-fetch';
+
+const cache = new Map();
+
+export async function ${fn}(params = {}) {
+  const key = JSON.stringify(params);
+  if (cache.has(key)) return cache.get(key);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ${rndInt(2000,10000)});
+
+  try {
+    const res = await fetch(\`${url}?q=\${encodeURIComponent(params.q || '')}\`, { signal: controller.signal });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const body = await res.json();
+    cache.set(key, body);
+    return body;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Example: ${fn}({ q: 'status' }).then(console.log).catch(console.error);
+`;
+  }
+
+  function buildPython(){
+    const cls = rndId('Model',4);
+    const lr = (Math.random()*0.001 + 0.0001).toFixed(6);
+    const epochs = rndInt(5,50);
+    return `# Python - simplified training loop
+import random
+from typing import List, Tuple
+
+class ${cls}:
+  def __init__(self, input_dim: int, hidden: int = 64):
+    self.input_dim = input_dim
+    self.hidden = hidden
+    self.weights = [random.random() for _ in range(input_dim * hidden)]
+
+  def forward(self, x: List[float]) -> List[float]:
+    # placeholder linear projection
+    s = sum(x)
+    return [s * w for w in self.weights[:self.hidden]]
+
+def train(model: ${cls}, dataset: List[Tuple[List[float], List[float]]], lr: float = ${lr}, epochs: int = ${epochs}):
+  for epoch in range(1, epochs + 1):
+    loss = 0.0
+    for x, y in dataset:
+      pred = model.forward(x)
+      loss += sum(abs(p - y_i) for p, y_i in zip(pred, y))
+    print(f"epoch={epoch}/{epochs} loss={loss:.4f}")
+  return model
+
+# Usage example:
+# model = ${cls}(input_dim=16)
+# train(model, dataset)
+`;
+  }
+
+  function buildGo(){
+    const pkg = sample(['netutil','agent','cache','rpc']);
+    const fn = rndId('Dial',4);
+    return `// Go - small connectivity helper
+package ${pkg}
+
+import (
+  "context"
+  "errors"
+  "net"
+  "time"
+)
+
+func ${fn}(ctx context.Context, addr string, timeout time.Duration) (net.Conn, error) {
+  d := net.Dialer{Timeout: timeout}
+  conn, err := d.DialContext(ctx, "tcp", addr)
+  if err != nil {
+    return nil, err
+  }
+  // basic probe read
+  buf := make([]byte, 8)
+  n, err := conn.Read(buf)
+  if err != nil || n == 0 {
+    conn.Close()
+    return nil, errors.New("handshake failed")
+  }
+  return conn, nil
+}
+`;
+  }
+
+  function buildRust(){
+    const func = rndId('compute',5);
+    return `// Rust - concurrent worker (tokio)
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::task;
+
+pub async fn ${func}(items: Vec<i32>) -> i64 {
+  let state = Arc::new(Mutex::new(0i64));
+  let mut handles = Vec::new();
+  for chunk in items.chunks(16) {
+    let s = state.clone();
+    let c = chunk.to_vec();
+    handles.push(task::spawn(async move {
+      let sum: i64 = c.iter().map(|&v| v as i64).sum();
+      let mut guard = s.lock().await;
+      *guard += sum;
+    }));
+  }
+  for h in handles { let _ = h.await; }
+  let guard = state.lock().await;
+  *guard
+}
+`;
+  }
+
+  function buildSQL(){
+    const table = rndId('events',5);
+    return `-- SQL analytical query for ${table}
+WITH latest AS (
+  SELECT user_id, max(ts) AS last_seen
+  FROM ${table}
+  WHERE ts > now() - interval '30 days'
+  GROUP BY user_id
+),
+active AS (
+  SELECT l.user_id, count(*) AS hits
+  FROM ${table} e
+  JOIN latest l ON e.user_id = l.user_id
+  WHERE e.ts > l.last_seen - interval '7 days'
+  GROUP BY l.user_id
+)
+SELECT a.user_id, a.hits
+FROM active a
+ORDER BY a.hits DESC
+LIMIT 100;
+`;
+  }
+
+  function buildShell(){
+    return `# Shell - backup & rotate logs
+set -euo pipefail
+
+BASE="/var/log/kern-logs"
+ARCHIVE="/mnt/archive/$(date +%F)"
+mkdir -p "$ARCHIVE"
+
+find "$BASE" -type f -name "*.log" | while read -r f; do
+  gzip -c "$f" > "${ARCHIVE}/$(basename "$f").gz"
+done
+
+# remove old
+find "$BASE" -type f -mtime +30 -delete
+echo "backup complete: $(date -Iseconds)"
+`;
+  }
+
+  function buildC(){
+    const fn = rndId('process',4);
+    return `/* C - low-level buffer processing */
+#include <stdint.h>
+#include <stdlib.h>
+
+int ${fn}(uint8_t *buf, size_t len, uint32_t key) {
+  if (!buf || len == 0) return -1;
+  for (size_t i = 0; i < len; ++i) {
+    buf[i] ^= (uint8_t)(key >> ((i % 4) * 8));
+  }
+  return 0;
+}
+
+/* usage:
+uint8_t data[256];
+${fn}(data, sizeof(data), 0x${rndHex(8)});
+*/
+`;
+  }
+
+  function buildJSON(){
+    const name = rndId('service',5);
+    return `{
+  "service": "${name}",
+  "version": "0.1.${rndInt(0,99)}",
+  "replicas": ${rndInt(1,12)},
+  "resources": { "cpu": "${(Math.random()*2+0.1).toFixed(2)}", "memory": "${rndInt(64,2048)}Mi" },
+  "env": { "LOG_LEVEL": "${sample(['info','debug','warn'])}" }
+}
+`;
+  }
+
+  function buildNN(){
+    const model = rndId('net',4);
+    return `# pseudo neural network config
+model: ${model}
+layers:
+  - type: conv
+    filters: ${sample([32,64,128])}
+    kernel: 3
+  - type: batchnorm
+  - type: relu
+  - type: dense
+    units: ${sample([128,256,512])}
+optimizer:
+  type: adam
+  lr: ${ (Math.random()*0.0009 + 0.0001).toFixed(6) }
+train:
+  batch_size: ${sample([16,32,64])}
+  epochs: ${rndInt(10,200)}
+`;
+  }
+
+  // Assemble several varied snippets into one tidy output
+  function generateSmartCode(){
+    const builders = [buildJavaScript, buildPython, buildGo, buildRust, buildSQL, buildShell, buildC, buildJSON, buildNN];
+    // ensure at least 2 distinct snippets and no accidental duplication
+    const chosen = [];
+    while (chosen.length < 2) {
+      chosen.push(sample(builders));
+    }
+    // optionally add 0-2 more different snippets
+    const extras = rndInt(0,2);
+    for (let i = 0; i < extras; i++) {
+      const b = sample(builders);
+      if (!chosen.includes(b)) chosen.push(b);
+    }
+    const parts = chosen.map(fn => fn());
+    parts.push(`=== SESSION INFO ===
+id: ${rndHex(16)}
+generated_at: ${new Date().toISOString()}
+snippets: ${parts.length}
+`);
+    return parts.join("\n\n");
+  }
+
+  // === Fixed typewriter ===
+  let fullText = generateSmartCode();
+  let idx = 0;
+  let speed = 12 + Math.random()*18; // ms per char
+
+  function resetAndPlay(){
+    fullText = generateSmartCode();
+    idx = 0;
+    screen.innerHTML = '';
+    play();
+  }
+
+  function play(){
+    // We'll maintain a current_line element and current_span for typed chars.
+    // When a newline is encountered, we create a new line and continue typing into its span.
+    let currentLine = document.createElement('div');
+    currentLine.className = 'line prompt';
+    screen.appendChild(currentLine);
+
+    let currentSpan = document.createElement('span');
+    currentLine.appendChild(currentSpan);
+
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor';
+    currentLine.appendChild(cursor);
+
+    function step(){
+      if (idx >= fullText.length) {
+        cursor.remove();
+        // occasional header
+        if (Math.random() > 0.6) {
+          const g = document.createElement('div');
+          g.className = 'line';
+          g.innerHTML = '<span class="glitch" data-text="*** AUTOGEN COMPLETE ***">*** AUTOGEN COMPLETE ***</span>';
+          screen.insertBefore(g, screen.firstChild);
+        }
+        return;
+      }
+
+      const ch = fullText[idx++];
+      if (ch === '\r') {
+        // ignore CR
+      } else if (ch === '\n') {
+        // move cursor to new line
+        cursor.remove();
+
+        currentLine = document.createElement('div');
+        currentLine.className = 'line';
+        screen.appendChild(currentLine);
+
+        currentSpan = document.createElement('span');
+        currentLine.appendChild(currentSpan);
+
+        // append cursor to the new line
+        currentLine.appendChild(cursor);
+      } else {
+        // normal character: append to currentSpan
+        currentSpan.innerText += ch;
+      }
+
+      // auto-scroll container to bottom
+      screen.parentElement.scrollTop = screen.parentElement.scrollHeight;
+
+      // variable delay for realism
+      let delay = speed + (Math.random()*36 - 12);
+      if (ch === ',' || ch === ';') delay += 40;
+      if (ch === '.') delay += 90 + Math.random()*120;
+      setTimeout(step, Math.max(6, Math.round(delay)));
+    }
+
+    step();
+  }
+
+  // start
+  play();
+
+  // controls
+  regenBtn.addEventListener('click', resetAndPlay);
+
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(fullText);
+      copyBtn.innerText = 'Copied';
+      setTimeout(() => copyBtn.innerText = 'Copy', 1500);
+    } catch (e) {
+      copyBtn.innerText = 'Fail';
+      setTimeout(() => copyBtn.innerText = 'Copy', 1500);
+    }
+  });
+
+  // small exposure for dev tinkering
+  window._smartGen = { generate: generateSmartCode, getText: () => fullText };
+})();
+</script>
+</body>
+</html>
