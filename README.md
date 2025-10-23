@@ -1,2 +1,2 @@
 # Ndwenos.github.io
-This is a hacking type
+i have nothing to say
